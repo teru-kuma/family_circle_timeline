@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:googleapis_auth/auth_io.dart';
@@ -26,7 +27,6 @@ class GoogleDriveService {
           AccessToken(
             "Bearer",
             auth.accessToken!,
-            // 現在のUTC時刻から1時間後のUTC時刻を設定
             DateTime.now().toUtc().add(const Duration(hours: 1)),
           ),
           null,
@@ -35,8 +35,8 @@ class GoogleDriveService {
             drive.DriveApi.driveFileScope,
             drive.DriveApi.driveMetadataReadonlyScope,
           ],
-  ),
-);
+        ),
+      );
 
       return drive.DriveApi(authClient);
     } catch (e) {
@@ -73,5 +73,19 @@ class GoogleDriveService {
       print("❌ Drive一覧取得エラー: $e");
       rethrow;
     }
+  }
+
+  // ✅ アップロード追加！
+  Future<void> uploadFileToFolder(File file, String fileName, String folderId) async {
+    final driveApi = await getDriveApi();
+    if (driveApi == null) throw Exception("Drive APIクライアント取得失敗");
+
+    final media = drive.Media(file.openRead(), await file.length());
+    final driveFile = drive.File()
+      ..name = fileName
+      ..parents = [folderId];
+
+    await driveApi.files.create(driveFile, uploadMedia: media);
+    print("✅ アップロード成功: $fileName");
   }
 }

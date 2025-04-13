@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:google_login_demo/screens/file_viewer_screen.dart';
+import 'package:image_picker/image_picker.dart';
 import '../services/google_drive_service.dart';
+import 'file_viewer_screen.dart';
 
 class DriveExplorerScreen extends StatefulWidget {
   const DriveExplorerScreen({super.key});
@@ -11,9 +13,13 @@ class DriveExplorerScreen extends StatefulWidget {
 
 class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
   final GoogleDriveService _driveService = GoogleDriveService();
+  final ImagePicker _picker = ImagePicker();
   List<Map<String, dynamic>> _files = [];
   bool _isLoading = true;
+  bool _isUploading = false;
   String? _error;
+
+  final String folderId = '1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6'; // あなたの共有フォルダID
 
   @override
   void initState() {
@@ -29,8 +35,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
 
     try {
       final files = await _driveService.listMyDriveFiles();
-      print("📄 取得件数: ${files.length}");
-
       setState(() {
         _files = files
             .map((f) => {
@@ -58,6 +62,31 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  Future<void> _uploadFile() async {
+    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) return;
+
+    setState(() => _isUploading = true);
+
+    final file = File(pickedFile.path);
+    final fileName = pickedFile.name;
+
+    try {
+      await _driveService.uploadFileToFolder(file, fileName, folderId);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("アップロード成功！")),
+      );
+      await loadFiles(); // アップロード後に一覧更新
+    } catch (e) {
+      print("❌ アップロードエラー: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("アップロードに失敗しました")),
+      );
+    } finally {
+      setState(() => _isUploading = false);
+    }
   }
 
   Widget _getFileIcon(String mimeType) {
@@ -90,6 +119,13 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: loadFiles,
+          ),
+          IconButton(
+            icon: _isUploading
+                ? const Icon(Icons.sync, color: Colors.grey)  // ← わかりやすく回ってる感
+                : const Icon(Icons.cloud_upload),
+            onPressed: _isUploading ? null : _uploadFile,
+            tooltip: "アップロード",
           ),
         ],
       ),
@@ -137,7 +173,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                                 )
                               : _getFileIcon(file['mimeType'] as String),
                           isThreeLine: true,
-
                           onTap: () {
                             Navigator.push(
                               context,
