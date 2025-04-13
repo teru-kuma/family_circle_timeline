@@ -146,7 +146,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                                   fileId: file['fileId']!,
                                   fileName: file['name']!,
                                   mimeType: file['mimeType']!,
-                                  fileSize: int.tryParse(file['size']) ?? 0,
                                 ),
                               ),
                             );

@@ -2,23 +2,20 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
-import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import '../services/google_drive_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class FileViewerScreen extends StatefulWidget {
   final String fileId;
   final String fileName;
   final String mimeType;
-  final int fileSize;
 
   const FileViewerScreen({
     super.key,
     required this.fileId,
     required this.fileName,
     required this.mimeType,
-    required this.fileSize,
   });
 
   @override
@@ -36,7 +33,11 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _loadFile();
+    if (widget.mimeType.startsWith('image/')) {
+      _loadFile();
+    } else {
+      _isLoading = false; // 動画などはすぐ表示用メッセージに切り替える
+    }
   }
 
   Future<void> _loadFile() async {
@@ -49,69 +50,23 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         _error = null;
       });
 
-      if (widget.mimeType.startsWith('video/')) {
-        // 動画の場合、Google Drive APIを使用してファイルを取得
-        final tempDir = await getTemporaryDirectory();
-        _tempFile = File('${tempDir.path}/${widget.fileName}');
+      final file = await driveApi.files.get(
+        widget.fileId,
+        downloadOptions: drive.DownloadOptions.fullMedia,
+      );
 
-        // 既存の一時ファイルを削除
-        if (await _tempFile!.exists()) {
-          await _tempFile!.delete();
+      if (file is drive.Media) {
+        final bytes = <int>[];
+        await for (final chunk in file.stream) {
+          bytes.addAll(chunk);
         }
 
-        // ファイルのダウンロード
-        final file = await driveApi.files.get(
-          widget.fileId,
-          downloadOptions: drive.DownloadOptions.fullMedia,
-        );
-
-        if (file is drive.Media) {
-          final bytes = <int>[];
-          await for (final chunk in file.stream) {
-            bytes.addAll(chunk);
-          }
-          
-          await _tempFile!.writeAsBytes(Uint8List.fromList(bytes), flush: true);
-
-          // 動画プレーヤーの初期化
-          _videoController = VideoPlayerController.file(_tempFile!)
-            ..initialize().then((_) {
-              setState(() {
-                _isLoading = false;
-              });
-              _videoController?.play();
-            })
-            ..addListener(() {
-              if (_videoController!.value.hasError) {
-                setState(() {
-                  _error = '動画の再生に失敗しました: ${_videoController!.value.errorDescription}';
-                  _isLoading = false;
-                });
-              }
-            });
-        } else {
-          throw Exception('動画ファイルの取得に失敗しました');
-        }
+        setState(() {
+          _fileBytes = Uint8List.fromList(bytes);
+          _isLoading = false;
+        });
       } else {
-        // 画像などの静的ファイルの場合
-        final file = await driveApi.files.get(
-          widget.fileId,
-          downloadOptions: drive.DownloadOptions.fullMedia,
-        );
-
-        if (file is drive.Media) {
-          final bytes = <int>[];
-          await for (final chunk in file.stream) {
-            bytes.addAll(chunk);
-          }
-
-          setState(() {
-            _fileBytes = Uint8List.fromList(bytes);
-            _isLoading = false;
-          });
-        } else {
-          throw Exception('ファイルの取得に失敗しました');
-        }
+        throw Exception('ファイルの取得に失敗しました');
       }
     } catch (e) {
       setState(() {
@@ -121,8 +76,27 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     }
   }
 
+  Future<void> _launchDriveVideo(String fileId) async {
+    final url = 'https://drive.google.com/file/d/$fileId/view';
+    final uri = Uri.parse(url);
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        throw '起動に失敗しました';
+      }
+    } catch (e) {
+      print("❌ URL起動に失敗しました: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('動画を開けませんでした。Google Driveアプリがインストールされていますか？')),
+      );
+    }
+  }
+
   Future<void> _cleanUp() async {
-    // 一時ファイルの削除
     if (_tempFile != null && await _tempFile!.exists()) {
       await _tempFile!.delete();
     }
@@ -130,14 +104,9 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
 
   @override
   void dispose() {
-    // 動画プレーヤーのクリーンアップ
     _videoController?.dispose();
     _videoController = null;
-
-    // 一時ファイルの削除
     _cleanUp();
-
-    // メモリ解放
     _fileBytes = null;
     super.dispose();
   }
@@ -149,11 +118,9 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         title: Text(widget.fileName),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () async {
-              await _cleanUp();  // 再読み込み前にクリーンアップ
-              _loadFile();
-            },
+            icon: const Icon(Icons.open_in_browser),
+            onPressed: () => _launchDriveVideo(widget.fileId),
+            tooltip: 'Google Driveで開く',
           ),
         ],
       ),
@@ -174,21 +141,16 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             Text(_error!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: () => _loadFile(),
+              onPressed: _loadFile,
               child: const Text("再試行"),
             ),
           ],
         ),
       );
-    } else if (widget.mimeType.startsWith('video/') && _videoController != null) {
-      return AspectRatio(
-        aspectRatio: _videoController!.value.aspectRatio,
-        child: VideoPlayer(_videoController!),
-      );
     } else if (widget.mimeType.startsWith('image/') && _fileBytes != null) {
       return Image.memory(_fileBytes!);
     } else {
-      return const Center(child: Text("このファイル形式にはまだ対応していません"));
+      return const Center(child: Text("動画はGoogle Driveアプリで再生できます"));
     }
   }
 }
