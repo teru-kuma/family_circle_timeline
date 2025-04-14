@@ -20,6 +20,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
   String? _error;
   String? _currentFileName; // アップロード中のファイル名
   double _fileSize = 0; // ファイルサイズを記録
+  bool _isGridView = true; // グリッドビュー/リストビュー切り替え用フラグ
 
   final String folderId = '1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6'; // Drive共有フォルダID
 
@@ -180,15 +181,173 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     return const Icon(Icons.insert_drive_file);
   }
 
+  // リストビューを構築
+  Widget _buildListView() {
+    return ListView.builder(
+      itemCount: _files.length,
+      itemBuilder: (context, index) {
+        final file = _files[index];
+        return ListTile(
+          title: Text(file['name']!),
+          subtitle: Text('${file['modifiedTime']}\n${file['size']}'),
+          leading: file['thumbnailLink']?.isNotEmpty == true
+              ? Image.network(
+                  file['thumbnailLink']!,
+                  width: 40,
+                  height: 40,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    print("🖼️ サムネイル読み込みエラー: $error");
+                    return _getFileIcon(file['mimeType'] as String);
+                  },
+                )
+              : _getFileIcon(file['mimeType'] as String),
+          trailing: file['mimeType']?.toString().startsWith('video/') == true
+              ? const Icon(Icons.play_circle_outline, color: Colors.red)
+              : null,
+          isThreeLine: true,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => FileViewerScreen(
+                  fileId: file['fileId']!,
+                  fileName: file['name']!,
+                  mimeType: file['mimeType']!,
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // グリッドビューを構築
+  Widget _buildGridView() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2, // 横に2つのアイテム
+        childAspectRatio: 0.75, // 縦長のカード
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+      ),
+      itemCount: _files.length,
+      itemBuilder: (context, index) {
+        final file = _files[index];
+        final bool isVideo = file['mimeType']?.toString().startsWith('video/') == true;
+        
+        return GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => FileViewerScreen(
+                  fileId: file['fileId']!,
+                  fileName: file['name']!,
+                  mimeType: file['mimeType']!,
+                ),
+              ),
+            );
+          },
+          child: Card(
+            elevation: 3,
+            clipBehavior: Clip.antiAlias, // 角丸のカードに合わせて内容を切り取る
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // サムネイルまたはアイコン
+                      file['thumbnailLink']?.isNotEmpty == true
+                          ? Image.network(
+                              file['thumbnailLink']!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  color: Colors.grey.shade200,
+                                  child: Center(
+                                    child: _getFileIcon(file['mimeType'] as String),
+                                  ),
+                                );
+                              },
+                            )
+                          : Container(
+                              color: Colors.grey.shade200,
+                              child: Center(
+                                child: _getFileIcon(file['mimeType'] as String),
+                              ),
+                            ),
+                      
+                      // 動画の場合は再生アイコンを重ねる
+                      if (isVideo)
+                        Center(
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.5),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.play_arrow,
+                              color: Colors.white,
+                              size: 32,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        file['name']!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        file['size']!,
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("家族写真・動画共有"),
         actions: [
+          // ビュー切り替えボタン
+          IconButton(
+            icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
+            onPressed: () {
+              setState(() {
+                _isGridView = !_isGridView;
+              });
+            },
+            tooltip: _isGridView ? "リスト表示" : "グリッド表示",
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _isUploading ? null : loadFiles,
+            tooltip: "更新",
           ),
           IconButton(
             icon: const Icon(Icons.cloud_upload),
@@ -223,45 +382,21 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                       ),
                     )
                   : _files.isEmpty
-                      ? const Center(child: Text("ファイルが見つかりません"))
-                      : ListView.builder(
-                          itemCount: _files.length,
-                          itemBuilder: (context, index) {
-                            final file = _files[index];
-                            return ListTile(
-                              title: Text(file['name']!),
-                              subtitle: Text('${file['modifiedTime']}\n${file['size']}'),
-                              leading: file['thumbnailLink']?.isNotEmpty == true
-                                  ? Image.network(
-                                      file['thumbnailLink']!,
-                                      width: 40,
-                                      height: 40,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) {
-                                        print("🖼️ サムネイル読み込みエラー: $error");
-                                        return _getFileIcon(file['mimeType'] as String);
-                                      },
-                                    )
-                                  : _getFileIcon(file['mimeType'] as String),
-                              trailing: file['mimeType']?.toString().startsWith('video/') == true
-                                  ? const Icon(Icons.play_circle_outline, color: Colors.red)
-                                  : null,
-                              isThreeLine: true,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => FileViewerScreen(
-                                      fileId: file['fileId']!,
-                                      fileName: file['name']!,
-                                      mimeType: file['mimeType']!,
-                                    ),
-                                  ),
-                                );
-                              },
-                            );
-                          },
-                        ),
+                      ? const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.photo_library_outlined, size: 64, color: Colors.grey),
+                              SizedBox(height: 16),
+                              Text(
+                                "ファイルが見つかりません\n右上のボタンから写真や動画をアップロードしてください",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        )
+                      : _isGridView ? _buildGridView() : _buildListView(),
           
           // アップロード中のオーバーレイ
           if (_isUploading)
