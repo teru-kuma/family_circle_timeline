@@ -22,11 +22,19 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
   double _fileSize = 0; // ファイルサイズを記録
   bool _isGridView = true; // グリッドビュー/リストビュー切り替え用フラグ
 
-  final String folderId = '1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6'; // Drive共有フォルダID
+  // フォルダナビゲーション用の変数を追加
+  final String rootFolderId = '1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6'; // メインフォルダID
+  String _currentFolderId = '1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6'; // 現在表示中のフォルダID
+  List<Map<String, String>> _folderPathHistory = []; // フォルダ階層の履歴
 
   @override
   void initState() {
     super.initState();
+    // 初期化時にルートフォルダをパス履歴に追加
+    _folderPathHistory.add({
+      'id': rootFolderId, 
+      'name': 'メインフォルダ' // ルートフォルダの表示名
+    });
     loadFiles();
   }
 
@@ -37,7 +45,8 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     });
 
     try {
-      final files = await _driveService.listMyDriveFiles();
+      // 指定されたフォルダ内のファイルを取得
+      final files = await _driveService.listFolderContents(_currentFolderId);
       setState(() {
         _files = files
             .map((f) => {
@@ -47,6 +56,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                   'modifiedTime': f.modifiedTime?.toLocal().toString() ?? '',
                   'size': f.size != null ? _formatFileSize(int.parse(f.size!)) : '',
                   'thumbnailLink': f.thumbnailLink,
+                  'isFolder': f.mimeType == 'application/vnd.google-apps.folder',
                 })
             .toList();
         _isLoading = false;
@@ -65,6 +75,37 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  // サブフォルダに移動するメソッド
+  void navigateToFolder(String folderId, String folderName) {
+    // 現在のフォルダをパス履歴に追加（すでに履歴にある場合は追加しない）
+    if (_folderPathHistory.last['id'] != folderId) {
+      _folderPathHistory.add({
+        'id': folderId,
+        'name': folderName,
+      });
+    }
+    
+    setState(() {
+      _currentFolderId = folderId;
+    });
+    
+    loadFiles(); // フォルダの内容を読み込む
+  }
+
+  // 親フォルダに戻るメソッド
+  void navigateBack() {
+    if (_folderPathHistory.length > 1) {
+      // 最後の要素（現在のフォルダ）を削除
+      _folderPathHistory.removeLast();
+      // 新しい現在のフォルダを設定
+      final parentFolder = _folderPathHistory.last;
+      setState(() {
+        _currentFolderId = parentFolder['id']!;
+      });
+      loadFiles();
+    }
   }
 
   // メディア選択ダイアログを表示
@@ -131,8 +172,8 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       
       print("📤 アップロード開始: $fileName (${_formatFileSize(fileSize)})");
 
-      // アップロード処理を行う
-      await _driveService.uploadFileToFolder(file, fileName, folderId);
+      // 現在のフォルダにアップロード
+      await _driveService.uploadFileToFolder(file, fileName, _currentFolderId);
       
       // 成功メッセージ
       ScaffoldMessenger.of(context).showSnackBar(
@@ -164,21 +205,32 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     if (mimeType.startsWith('image/')) {
       return const Icon(Icons.image);
     } else if (mimeType.startsWith('video/')) {
-      return const Icon(Icons.video_file);
-    } else if (mimeType.startsWith('audio/')) {
-      return const Icon(Icons.audio_file);
-    } else if (mimeType.contains('folder')) {
-      return const Icon(Icons.folder);
-    } else if (mimeType.contains('pdf')) {
-      return const Icon(Icons.picture_as_pdf);
-    } else if (mimeType.contains('document') || mimeType.contains('text')) {
-      return const Icon(Icons.description);
-    } else if (mimeType.contains('spreadsheet')) {
-      return const Icon(Icons.table_chart);
-    } else if (mimeType.contains('presentation')) {
-      return const Icon(Icons.slideshow);
+      return const Icon(Icons.video_library, color: Colors.red);
+    } else if (mimeType == 'application/vnd.google-apps.folder') {
+      return const Icon(Icons.folder, color: Colors.orange);
+    } else {
+      return const Icon(Icons.insert_drive_file);
     }
-    return const Icon(Icons.insert_drive_file);
+  }
+
+  // ファイルをタップした時の処理
+  void _handleFileTap(Map<String, dynamic> file) {
+    if (file['isFolder'] == true) {
+      // フォルダの場合はそのフォルダに移動
+      navigateToFolder(file['fileId'], file['name']);
+    } else {
+      // ファイルの場合はビューアを表示
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FileViewerScreen(
+            fileId: file['fileId']!,
+            fileName: file['name']!,
+            mimeType: file['mimeType']!,
+          ),
+        ),
+      );
+    }
   }
 
   // リストビューを構築
@@ -187,37 +239,33 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       itemCount: _files.length,
       itemBuilder: (context, index) {
         final file = _files[index];
+        final bool isFolder = file['isFolder'] == true;
+        
         return ListTile(
           title: Text(file['name']!),
-          subtitle: Text('${file['modifiedTime']}\n${file['size']}'),
-          leading: file['thumbnailLink']?.isNotEmpty == true
-              ? Image.network(
-                  file['thumbnailLink']!,
-                  width: 40,
-                  height: 40,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    print("🖼️ サムネイル読み込みエラー: $error");
-                    return _getFileIcon(file['mimeType'] as String);
-                  },
-                )
-              : _getFileIcon(file['mimeType'] as String),
-          trailing: file['mimeType']?.toString().startsWith('video/') == true
-              ? const Icon(Icons.play_circle_outline, color: Colors.red)
-              : null,
-          isThreeLine: true,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => FileViewerScreen(
-                  fileId: file['fileId']!,
-                  fileName: file['name']!,
-                  mimeType: file['mimeType']!,
-                ),
-              ),
-            );
-          },
+          subtitle: Text(isFolder 
+              ? 'フォルダ'
+              : '${file['modifiedTime']}\n${file['size']}'),
+          leading: isFolder
+              ? const Icon(Icons.folder, color: Colors.orange, size: 40)
+              : (file['thumbnailLink']?.isNotEmpty == true
+                  ? Image.network(
+                      file['thumbnailLink']!,
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return _getFileIcon(file['mimeType'] as String);
+                      },
+                    )
+                  : _getFileIcon(file['mimeType'] as String)),
+          trailing: isFolder
+              ? const Icon(Icons.arrow_forward_ios)
+              : (file['mimeType']?.toString().startsWith('video/') == true
+                  ? const Icon(Icons.play_circle_outline, color: Colors.red)
+                  : null),
+          isThreeLine: !isFolder,
+          onTap: () => _handleFileTap(file),
         );
       },
     );
@@ -236,21 +284,11 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       itemCount: _files.length,
       itemBuilder: (context, index) {
         final file = _files[index];
-        final bool isVideo = file['mimeType']?.toString().startsWith('video/') == true;
+        final bool isFolder = file['isFolder'] == true;
+        final bool isVideo = !isFolder && file['mimeType']?.toString().startsWith('video/') == true;
         
         return GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => FileViewerScreen(
-                  fileId: file['fileId']!,
-                  fileName: file['name']!,
-                  mimeType: file['mimeType']!,
-                ),
-              ),
-            );
-          },
+          onTap: () => _handleFileTap(file),
           child: Card(
             elevation: 3,
             clipBehavior: Clip.antiAlias, // 角丸のカードに合わせて内容を切り取る
@@ -261,26 +299,33 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      // サムネイルまたはアイコン
-                      file['thumbnailLink']?.isNotEmpty == true
-                          ? Image.network(
-                              file['thumbnailLink']!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
+                      // フォルダかファイルか
+                      isFolder
+                          ? Container(
+                              color: Colors.orange.shade100,
+                              child: const Center(
+                                child: Icon(Icons.folder, color: Colors.orange, size: 64),
+                              ),
+                            )
+                          : (file['thumbnailLink']?.isNotEmpty == true
+                              ? Image.network(
+                                  file['thumbnailLink']!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      color: Colors.grey.shade200,
+                                      child: Center(
+                                        child: _getFileIcon(file['mimeType'] as String),
+                                      ),
+                                    );
+                                  },
+                                )
+                              : Container(
                                   color: Colors.grey.shade200,
                                   child: Center(
                                     child: _getFileIcon(file['mimeType'] as String),
                                   ),
-                                );
-                              },
-                            )
-                          : Container(
-                              color: Colors.grey.shade200,
-                              child: Center(
-                                child: _getFileIcon(file['mimeType'] as String),
-                              ),
-                            ),
+                                )),
                       
                       // 動画の場合は再生アイコンを重ねる
                       if (isVideo)
@@ -314,7 +359,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        file['size']!,
+                        isFolder ? 'フォルダ' : file['size']!,
                         style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                       ),
                     ],
@@ -328,13 +373,68 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     );
   }
 
+  // パンくずリストを表示するウィジェット
+  Widget _buildBreadcrumbs() {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      color: Colors.grey.shade100,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: _folderPathHistory.asMap().entries.map((entry) {
+            final index = entry.key;
+            final folder = entry.value;
+            final isLast = index == _folderPathHistory.length - 1;
+            
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  onTap: isLast ? null : () {
+                    // パスの途中のフォルダをクリックした場合、そこまで戻る
+                    while (_folderPathHistory.length > index + 1) {
+                      _folderPathHistory.removeLast();
+                    }
+                    setState(() {
+                      _currentFolderId = folder['id']!;
+                    });
+                    loadFiles();
+                  },
+                  child: Text(
+                    folder['name']!,
+                    style: TextStyle(
+                      color: isLast ? Colors.black : Colors.blue,
+                      fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ),
+                if (!isLast) 
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(Icons.chevron_right, size: 16),
+                  ),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("家族写真・動画共有"),
+        leading: _folderPathHistory.length > 1
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: navigateBack,
+                tooltip: "戻る",
+              )
+            : null,
         actions: [
-          // ビュー切り替えボタン
           IconButton(
             icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
             onPressed: () {
@@ -356,83 +456,91 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
           ),
         ],
       ),
-      body: Stack(
+      body: Column(
         children: [
-          // メインコンテンツ
-          _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                          const SizedBox(height: 16),
-                          Text(
-                            _error!,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.red),
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: loadFiles,
-                            child: const Text("再試行"),
-                          ),
-                        ],
-                      ),
-                    )
-                  : _files.isEmpty
-                      ? const Center(
+          // パンくずリスト
+          _buildBreadcrumbs(),
+          // コンテンツ
+          Expanded(
+            child: Stack(
+              children: [
+                _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _error != null
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _error!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.red),
+                                ),
+                                const SizedBox(height: 16),
+                                ElevatedButton(
+                                  onPressed: loadFiles,
+                                  child: const Text("再試行"),
+                                ),
+                              ],
+                            ),
+                          )
+                        : _files.isEmpty
+                            ? const Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.folder_open, size: 64, color: Colors.grey),
+                                    SizedBox(height: 16),
+                                    Text(
+                                      "このフォルダには何もありません\n右上のボタンから写真や動画をアップロードしてください",
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: Colors.grey),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : _isGridView ? _buildGridView() : _buildListView(),
+                
+                // アップロード中のオーバーレイ
+                if (_isUploading)
+                  Container(
+                    color: Colors.black.withOpacity(0.7),
+                    child: Center(
+                      child: Card(
+                        elevation: 8,
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
                           child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.photo_library_outlined, size: 64, color: Colors.grey),
-                              SizedBox(height: 16),
+                              const CircularProgressIndicator(),
+                              const SizedBox(height: 20),
                               Text(
-                                "ファイルが見つかりません\n右上のボタンから写真や動画をアップロードしてください",
+                                "「${_currentFileName ?? ''}」をアップロード中",
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                "ファイルサイズ: ${_formatFileSize(_fileSize.toInt())}",
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              const SizedBox(height: 10),
+                              const Text(
+                                "大きなファイルの場合は時間がかかります\n電源を切らずにそのままお待ちください",
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.grey),
+                                style: TextStyle(fontSize: 12, color: Colors.grey),
                               ),
                             ],
                           ),
-                        )
-                      : _isGridView ? _buildGridView() : _buildListView(),
-          
-          // アップロード中のオーバーレイ
-          if (_isUploading)
-            Container(
-              color: Colors.black.withOpacity(0.7),
-              child: Center(
-                child: Card(
-                  elevation: 8,
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircularProgressIndicator(),
-                        const SizedBox(height: 20),
-                        Text(
-                          "「${_currentFileName ?? ''}」をアップロード中",
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          "ファイルサイズ: ${_formatFileSize(_fileSize.toInt())}",
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          "大きなファイルの場合は時間がかかります\n電源を切らずにそのままお待ちください",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
+              ],
             ),
+          ),
         ],
       ),
     );

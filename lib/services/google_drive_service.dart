@@ -45,17 +45,16 @@ class GoogleDriveService {
     }
   }
 
-  Future<List<drive.File>> listMyDriveFiles() async {
+  // 特定のフォルダ内のファイルとサブフォルダを取得するメソッド（新規追加）
+  Future<List<drive.File>> listFolderContents(String folderId) async {
     try {
       final driveApi = await getDriveApi();
       if (driveApi == null) throw Exception("Drive APIクライアント取得失敗");
 
-      print("🔍 Drive API呼び出し開始");
-
-      final folderId = '1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6';
+      print("🔍 $folderId のファイル一覧取得開始");
 
       final fileList = await driveApi.files.list(
-        q: "'$folderId' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false",
+        q: "'$folderId' in parents and trashed = false",
         $fields: "files(id, name, mimeType, modifiedTime, size, thumbnailLink)",
         pageSize: 100,
         orderBy: "modifiedTime desc",
@@ -70,12 +69,17 @@ class GoogleDriveService {
 
       return fileList.files ?? [];
     } catch (e) {
-      print("❌ Drive一覧取得エラー: $e");
+      print("❌ ファイル一覧取得エラー: $e");
       rethrow;
     }
   }
 
-  // ✅ アップロード追加！
+  // 既存のメソッドを修正
+  Future<List<drive.File>> listMyDriveFiles() async {
+    return listFolderContents('1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6');
+  }
+
+  // アップロードメソッドはそのまま
   Future<void> uploadFileToFolder(File file, String fileName, String folderId) async {
     final driveApi = await getDriveApi();
     if (driveApi == null) throw Exception("Drive APIクライアント取得失敗");
