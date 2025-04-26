@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../services/google_drive_service.dart';
 import 'file_viewer_screen.dart';
+import 'auth_screen.dart';
 
 class DriveExplorerScreen extends StatefulWidget {
   const DriveExplorerScreen({super.key});
@@ -14,6 +16,12 @@ class DriveExplorerScreen extends StatefulWidget {
 class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
   final GoogleDriveService _driveService = GoogleDriveService();
   final ImagePicker _picker = ImagePicker();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: [
+      'email',
+      'https://www.googleapis.com/auth/drive.readonly',
+    ],
+  );
   List<Map<String, dynamic>> _files = [];
   bool _isLoading = true;
   bool _isUploading = false;
@@ -424,124 +432,145 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("家族写真・動画共有"),
-        leading: _folderPathHistory.length > 1
+    return WillPopScope(
+      onWillPop: () async {
+        if (_folderPathHistory.length > 1) {
+          navigateBack();
+          return false; // 画面を閉じずに、親フォルダに戻す
+        }
+        return true; // ルートなら通常の戻る動作
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text("家族写真・動画共有"),
+          leading: _folderPathHistory.length > 1
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
                 onPressed: navigateBack,
                 tooltip: "戻る",
               )
             : null,
-        actions: [
-          IconButton(
-            icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
-            onPressed: () {
-              setState(() {
-                _isGridView = !_isGridView;
-              });
-            },
-            tooltip: _isGridView ? "リスト表示" : "グリッド表示",
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _isUploading ? null : loadFiles,
-            tooltip: "更新",
-          ),
-          IconButton(
-            icon: const Icon(Icons.cloud_upload),
-            onPressed: _isUploading ? null : _showMediaPickerDialog,
-            tooltip: "写真・動画アップロード",
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // パンくずリスト
-          _buildBreadcrumbs(),
-          // コンテンツ
-          Expanded(
-            child: Stack(
-              children: [
-                _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _error != null
-                        ? Center(
+          actions: [
+            IconButton(
+              icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
+              onPressed: () {
+                setState(() {
+                  _isGridView = !_isGridView;
+                });
+              },
+              tooltip: _isGridView ? "リスト表示" : "グリッド表示",
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _isUploading ? null : loadFiles,
+              tooltip: "更新",
+            ),
+            IconButton(
+              icon: const Icon(Icons.cloud_upload),
+              onPressed: _isUploading ? null : _showMediaPickerDialog,
+              tooltip: "写真・動画アップロード",
+            ),
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'ログアウト',
+              onPressed: () async {
+                await _googleSignIn.signOut();
+                if (!mounted) return;
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const AuthScreen()),
+                  (Route<dynamic> route) => false,
+                );
+              },
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            // パンくずリスト
+            _buildBreadcrumbs(),
+            // コンテンツ
+            Expanded(
+              child: Stack(
+                children: [
+                  _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _error != null
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    _error!,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Colors.red),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  ElevatedButton(
+                                    onPressed: loadFiles,
+                                    child: const Text("再試行"),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : _files.isEmpty
+                              ? const Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.folder_open, size: 64, color: Colors.grey),
+                                      SizedBox(height: 16),
+                                      Text(
+                                        "このフォルダには何もありません\n右上のボタンから写真や動画をアップロードしてください",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : _isGridView ? _buildGridView() : _buildListView(),
+                  
+                  // アップロード中のオーバーレイ
+                  if (_isUploading)
+                    Container(
+                      color: Colors.black.withOpacity(0.7),
+                      child: Center(
+                        child: Card(
+                          elevation: 8,
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
                             child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                                const SizedBox(height: 16),
+                                const CircularProgressIndicator(),
+                                const SizedBox(height: 20),
                                 Text(
-                                  _error!,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(color: Colors.red),
+                                  "「${_currentFileName ?? ''}」をアップロード中",
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                                 ),
-                                const SizedBox(height: 16),
-                                ElevatedButton(
-                                  onPressed: loadFiles,
-                                  child: const Text("再試行"),
+                                const SizedBox(height: 10),
+                                Text(
+                                  "ファイルサイズ: ${_formatFileSize(_fileSize.toInt())}",
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  "大きなファイルの場合は時間がかかります\n電源を切らずにそのままお待ちください",
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 12, color: Colors.grey),
                                 ),
                               ],
                             ),
-                          )
-                        : _files.isEmpty
-                            ? const Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.folder_open, size: 64, color: Colors.grey),
-                                    SizedBox(height: 16),
-                                    Text(
-                                      "このフォルダには何もありません\n右上のボタンから写真や動画をアップロードしてください",
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(color: Colors.grey),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : _isGridView ? _buildGridView() : _buildListView(),
-                
-                // アップロード中のオーバーレイ
-                if (_isUploading)
-                  Container(
-                    color: Colors.black.withOpacity(0.7),
-                    child: Center(
-                      child: Card(
-                        elevation: 8,
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const CircularProgressIndicator(),
-                              const SizedBox(height: 20),
-                              Text(
-                                "「${_currentFileName ?? ''}」をアップロード中",
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 10),
-                              Text(
-                                "ファイルサイズ: ${_formatFileSize(_fileSize.toInt())}",
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                              const SizedBox(height: 10),
-                              const Text(
-                                "大きなファイルの場合は時間がかかります\n電源を切らずにそのままお待ちください",
-                                textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 12, color: Colors.grey),
-                              ),
-                            ],
                           ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

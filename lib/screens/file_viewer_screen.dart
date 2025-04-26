@@ -116,13 +116,6 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.fileName),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.open_in_browser),
-            onPressed: () => _launchDriveVideo(widget.fileId),
-            tooltip: 'Google Driveで開く',
-          ),
-        ],
       ),
       body: _buildContent(),
     );
@@ -149,8 +142,20 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
       );
     } else if (widget.mimeType.startsWith('image/') && _fileBytes != null) {
       return Image.memory(_fileBytes!);
+    } else if (widget.mimeType.startsWith('video/')) {
+      return Center(
+        child: ElevatedButton.icon(
+          icon: const Icon(Icons.play_circle_fill, size: 48),
+          label: const Text("Google Driveで再生", style: TextStyle(fontSize: 20)),
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          onPressed: () => _launchDriveVideo(widget.fileId),
+        ),
+      );
     } else {
-      return const Center(child: Text("動画はGoogle Driveアプリで再生できます"));
+      return const Center(child: Text("このファイルはプレビューできません"));
     }
   }
 }
