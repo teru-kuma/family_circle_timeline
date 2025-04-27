@@ -167,22 +167,47 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
   Future<void> _uploadMediaFile(XFile mediaFile) async {
     // ファイルサイズの取得
     final int fileSize = await mediaFile.length();
-    
+
+    // ファイル名入力ダイアログ
+    String fileName = mediaFile.name;
+    final TextEditingController controller = TextEditingController(text: fileName);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ファイル名を入力'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'ファイル名'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('アップロード'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null || result.isEmpty) return; // キャンセル時は何もしない
+    fileName = result;
+
     setState(() {
       _isUploading = true;
-      _currentFileName = mediaFile.name;
+      _currentFileName = fileName;
       _fileSize = fileSize.toDouble();
     });
 
     try {
       final File file = File(mediaFile.path);
-      final String fileName = mediaFile.name;
-      
       print("📤 アップロード開始: $fileName (${_formatFileSize(fileSize)})");
 
       // 現在のフォルダにアップロード
       await _driveService.uploadFileToFolder(file, fileName, _currentFolderId);
-      
+
       // 成功メッセージ
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -190,7 +215,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
           backgroundColor: Colors.green,
         ),
       );
-      
+
       // ファイル一覧を更新
       await loadFiles();
     } catch (e) {
