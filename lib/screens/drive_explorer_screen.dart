@@ -2,9 +2,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:exif/exif.dart';
 import '../services/google_drive_service.dart';
 import 'file_viewer_screen.dart';
 import 'auth_screen.dart';
+import 'package:intl/intl.dart';
+import 'package:intl/intl.dart';
 
 class DriveExplorerScreen extends StatefulWidget {
   const DriveExplorerScreen({super.key});
@@ -85,29 +88,22 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
-  // サブフォルダに移動するメソッド
   void navigateToFolder(String folderId, String folderName) {
-    // 現在のフォルダをパス履歴に追加（すでに履歴にある場合は追加しない）
     if (_folderPathHistory.last['id'] != folderId) {
       _folderPathHistory.add({
         'id': folderId,
         'name': folderName,
       });
     }
-    
     setState(() {
       _currentFolderId = folderId;
     });
-    
-    loadFiles(); // フォルダの内容を読み込む
+    loadFiles();
   }
 
-  // 親フォルダに戻るメソッド
   void navigateBack() {
     if (_folderPathHistory.length > 1) {
-      // 最後の要素（現在のフォルダ）を削除
       _folderPathHistory.removeLast();
-      // 新しい現在のフォルダを設定
       final parentFolder = _folderPathHistory.last;
       setState(() {
         _currentFolderId = parentFolder['id']!;
@@ -116,7 +112,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     }
   }
 
-  // メディア選択ダイアログを表示
   Future<void> _showMediaPickerDialog() async {
     showModalBottomSheet(
       context: context,
@@ -163,14 +158,87 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     }
   }
 
+  // ファイル名自動生成ロジック
+  Future<String> getDefaultFileName(XFile mediaFile) async {
+    final File file = File(mediaFile.path);
+    final isVideo = mediaFile.mimeType?.startsWith('video/') ?? false;
+    final prefix = isVideo ? "VID" : "IMG";
+    
+    try {
+      // 撮影日時を取得
+      final DateTime? date = await _getMediaDate(file.path);
+      if (date != null) {
+        // 撮影日時が取得できた場合
+        final dateStr = DateFormat('yyyyMMdd_HHmmss').format(date);
+        final ext = mediaFile.path.split('.').last;
+        return "${prefix}_$dateStr.$ext";
+      }
+    } catch (e) {
+      print('撮影日時取得エラー: $e');
+    }
+
+    // 撮影日時が取得できなかった場合、ファイル作成日時を使用
+    try {
+      final stat = await file.stat();
+      final creationDate = stat.modified;
+      final now = DateTime.now();
+      
+      // ファイル作成日時と現在時刻を組み合わせ
+      final dateStr = DateFormat('yyyyMMdd').format(creationDate);
+      final timeStr = DateFormat('HHmmss').format(now);
+      final ext = mediaFile.path.split('.').last;
+      return "${prefix}_${dateStr}_${timeStr}.$ext";
+    } catch (e) {
+      print('ファイル情報取得エラー: $e');
+      // 最終手段として現在時刻を使用
+      final now = DateTime.now();
+      final formatted = DateFormat('yyyyMMdd_HHmmss').format(now);
+      final ext = mediaFile.path.split('.').last;
+      return "${prefix}_$formatted.$ext";
+    }
+  }
+
+  // メディアファイルの撮影日時を取得
+  Future<DateTime?> _getMediaDate(String imagePath) async {
+    try {
+      // 画像のEXIFデータを取得
+      final bytes = await File(imagePath).readAsBytes();
+      final tags = await readExifFromBytes(bytes);
+      
+      // 撮影日時を取得（EXIFデータから）
+      if (tags != null) {
+        final dateTimeOriginal = tags['Image DateTime']?.printable;
+        if (dateTimeOriginal != null) {
+          // EXIFの日付フォーマット（YYYY:MM:DD HH:MM:SS）をパース
+          // 例: 2025:05:04 12:56:40 -> 2025-05-04 12:56:40
+          final parts = dateTimeOriginal.split(' ');
+          final datePart = parts[0].replaceAll(':', '-');
+          final timePart = parts[1];
+          
+          // 時刻部分の - を : に戻す
+          final timePartFixed = timePart.replaceAll('-', ':');
+          
+          // DateTime.parse()は空白区切りでもパース可能
+          return DateTime.parse('$datePart $timePartFixed');
+          // もしくは、ISO 8601形式で
+          // return DateTime.parse('$datePartT$timePartFixed');
+        }
+      }
+      
+      // EXIFデータが見つからない場合はファイルの作成日時を使用
+      final file = File(imagePath);
+      final stat = await file.stat();
+      return stat.modified;
+    } catch (e) {
+      print('撮影日時取得エラー: $e');
+      return null;
+    }
+  }
   // 選択されたメディアファイルをアップロード
   Future<void> _uploadMediaFile(XFile mediaFile) async {
-    // ファイルサイズの取得
     final int fileSize = await mediaFile.length();
-
-    // ファイル名入力ダイアログ
-    String fileName = mediaFile.name;
-    final TextEditingController controller = TextEditingController(text: fileName);
+    final String defaultFileName = await getDefaultFileName(mediaFile);
+    final TextEditingController controller = TextEditingController(text: defaultFileName);
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -193,7 +261,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     );
 
     if (result == null || result.isEmpty) return; // キャンセル時は何もしない
-    fileName = result;
+    final fileName = result;
 
     setState(() {
       _isUploading = true;
@@ -203,26 +271,20 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
 
     try {
       final File file = File(mediaFile.path);
-      print("📤 アップロード開始: $fileName (${_formatFileSize(fileSize)})");
-
-      // 現在のフォルダにアップロード
+      print("\uD83D\uDCE4 アップロード開始: $fileName (\${_formatFileSize(fileSize)})");
       await _driveService.uploadFileToFolder(file, fileName, _currentFolderId);
-
-      // 成功メッセージ
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("「$fileName」のアップロード完了！"),
           backgroundColor: Colors.green,
         ),
       );
-
-      // ファイル一覧を更新
       await loadFiles();
     } catch (e) {
       print("❌ アップロードエラー: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("「${_currentFileName}」のアップロードに失敗しました"),
+          content: Text("「\${_currentFileName}」のアップロードに失敗しました"),
           backgroundColor: Colors.red,
         ),
       );
@@ -246,13 +308,10 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     }
   }
 
-  // ファイルをタップした時の処理
   void _handleFileTap(Map<String, dynamic> file) {
     if (file['isFolder'] == true) {
-      // フォルダの場合はそのフォルダに移動
       navigateToFolder(file['fileId'], file['name']);
     } else {
-      // ファイルの場合はビューアを表示
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -266,19 +325,17 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     }
   }
 
-  // リストビューを構築
   Widget _buildListView() {
     return ListView.builder(
       itemCount: _files.length,
       itemBuilder: (context, index) {
         final file = _files[index];
         final bool isFolder = file['isFolder'] == true;
-        
         return ListTile(
           title: Text(file['name']!),
           subtitle: Text(isFolder 
               ? 'フォルダ'
-              : '${file['modifiedTime']}\n${file['size']}'),
+              : '${file['modifiedTime'] ?? ''}\n${file['size'] ?? ''}'),
           leading: isFolder
               ? const Icon(Icons.folder, color: Colors.orange, size: 40)
               : (file['thumbnailLink']?.isNotEmpty == true
@@ -304,13 +361,12 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     );
   }
 
-  // グリッドビューを構築
   Widget _buildGridView() {
     return GridView.builder(
       padding: const EdgeInsets.all(8),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2, // 横に2つのアイテム
-        childAspectRatio: 0.75, // 縦長のカード
+        crossAxisCount: 2,
+        childAspectRatio: 0.75,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
       ),
@@ -319,12 +375,11 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
         final file = _files[index];
         final bool isFolder = file['isFolder'] == true;
         final bool isVideo = !isFolder && file['mimeType']?.toString().startsWith('video/') == true;
-        
         return GestureDetector(
           onTap: () => _handleFileTap(file),
           child: Card(
             elevation: 3,
-            clipBehavior: Clip.antiAlias, // 角丸のカードに合わせて内容を切り取る
+            clipBehavior: Clip.antiAlias,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -332,7 +387,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      // フォルダかファイルか
                       isFolder
                           ? Container(
                               color: Colors.orange.shade100,
@@ -359,8 +413,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                                     child: _getFileIcon(file['mimeType'] as String),
                                   ),
                                 )),
-                      
-                      // 動画の場合は再生アイコンを重ねる
                       if (isVideo)
                         Center(
                           child: Container(
@@ -406,7 +458,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     );
   }
 
-  // パンくずリストを表示するウィジェット
   Widget _buildBreadcrumbs() {
     return Container(
       height: 36,
@@ -419,13 +470,11 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
             final index = entry.key;
             final folder = entry.value;
             final isLast = index == _folderPathHistory.length - 1;
-            
             return Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 InkWell(
                   onTap: isLast ? null : () {
-                    // パスの途中のフォルダをクリックした場合、そこまで戻る
                     while (_folderPathHistory.length > index + 1) {
                       _folderPathHistory.removeLast();
                     }
@@ -461,9 +510,9 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       onWillPop: () async {
         if (_folderPathHistory.length > 1) {
           navigateBack();
-          return false; // 画面を閉じずに、親フォルダに戻す
+          return false;
         }
-        return true; // ルートなら通常の戻る動作
+        return true;
       },
       child: Scaffold(
         appBar: AppBar(
@@ -555,7 +604,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                                   ),
                                 )
                               : _isGridView ? _buildGridView() : _buildListView(),
-                  
+
                   // アップロード中のオーバーレイ
                   if (_isUploading)
                     Container(
