@@ -161,7 +161,11 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
   // ファイル名自動生成ロジック
   Future<String> getDefaultFileName(XFile mediaFile) async {
     final File file = File(mediaFile.path);
-    final isVideo = mediaFile.mimeType?.startsWith('video/') ?? false;
+    final isVideo = mediaFile.path.toLowerCase().endsWith('.mp4') || 
+                    mediaFile.path.toLowerCase().endsWith('.mov') || 
+                    mediaFile.path.toLowerCase().endsWith('.avi') || 
+                    mediaFile.path.toLowerCase().endsWith('.mkv') || 
+                    mediaFile.path.toLowerCase().endsWith('.wmv');
     final prefix = isVideo ? "VID" : "IMG";
     
     try {
