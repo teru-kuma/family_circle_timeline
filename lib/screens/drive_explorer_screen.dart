@@ -7,7 +7,7 @@ import '../services/google_drive_service.dart';
 import 'file_viewer_screen.dart';
 import 'auth_screen.dart';
 import 'package:intl/intl.dart';
-import 'package:intl/intl.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class DriveExplorerScreen extends StatefulWidget {
   const DriveExplorerScreen({super.key});
@@ -34,17 +34,22 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
   bool _isGridView = true; // グリッドビュー/リストビュー切り替え用フラグ
 
   // フォルダナビゲーション用の変数を追加
-  final String rootFolderId = '1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6'; // メインフォルダID
-  String _currentFolderId = '1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6'; // 現在表示中のフォルダID
+  final String rootFolderId = dotenv.env['GOOGLE_DRIVE_FOLDER_ID'] ?? '';
+  String _currentFolderId = dotenv.env['GOOGLE_DRIVE_FOLDER_ID'] ?? '';
   List<Map<String, String>> _folderPathHistory = []; // フォルダ階層の履歴
+
+  // ★変更点：ここから
+  // タイムライン表示用の、日付でグループ化されたファイルを保持する新しい変数
+  Map<String, List<Map<String, dynamic>>> _groupedFiles = {};
+  // ★変更点：ここまで
 
   @override
   void initState() {
     super.initState();
     // 初期化時にルートフォルダをパス履歴に追加
     _folderPathHistory.add({
-      'id': rootFolderId, 
-      'name': 'メインフォルダ' // ルートフォルダの表示名
+      'id': rootFolderId,
+      'name': 'メインフォルダ'
     });
     loadFiles();
   }
@@ -60,16 +65,24 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       final files = await _driveService.listFolderContents(_currentFolderId);
       setState(() {
         _files = files
+            .where((f) => f.mimeType != 'application/vnd.google-apps.folder') // フォルダは除外（今回のタイムラインはファイルのみ）
             .map((f) => {
                   'fileId': f.id ?? '',
                   'name': f.name ?? '',
                   'mimeType': f.mimeType ?? '',
                   'modifiedTime': f.modifiedTime?.toLocal().toString() ?? '',
+                  'dateTime': f.modifiedTime?.toLocal(), // DateTime型を保持
                   'size': f.size != null ? _formatFileSize(int.parse(f.size!)) : '',
                   'thumbnailLink': f.thumbnailLink,
-                  'isFolder': f.mimeType == 'application/vnd.google-apps.folder',
+                  'isFolder': f.mimeType == 'application/vnd.google-apps.folder', // フォルダは除外したのでここは常にfalseになる
                 })
             .toList();
+
+        // ★変更点：ここから
+        // 取得したファイルを日付ごとにグループ化
+        _groupedFiles = _groupFilesByDate(_files);
+        // ★変更点：ここまで
+
         _isLoading = false;
       });
     } catch (e) {
@@ -80,6 +93,43 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       });
     }
   }
+
+  // ★変更点：ここから
+  // ファイルを日付ごとにグループ化する新しいメソッド
+  Map<String, List<Map<String, dynamic>>> _groupFilesByDate(
+      List<Map<String, dynamic>> files) {
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    for (var file in files) {
+      final DateTime? dateTime = file['dateTime'] as DateTime?;
+      if (dateTime != null) {
+        // 日付部分だけを文字列として取得（例: 2024/05/20）
+        final String dateKey = DateFormat('yyyy/MM/dd').format(dateTime);
+        if (!grouped.containsKey(dateKey)) {
+          grouped[dateKey] = [];
+        }
+        grouped[dateKey]!.add(file);
+      }
+    }
+    // 日付の新しい順にソート
+    final sortedKeys = grouped.keys.toList()
+      ..sort((a, b) => b.compareTo(a));
+    
+    final Map<String, List<Map<String, dynamic>>> sortedGrouped = {};
+    for (var key in sortedKeys) {
+      sortedGrouped[key] = grouped[key]!;
+      // 各日付内のファイルを新しい順にソート
+      sortedGrouped[key]!.sort((a, b) {
+        final DateTime? dateA = a['dateTime'] as DateTime?;
+        final DateTime? dateB = b['dateTime'] as DateTime?;
+        if (dateA == null || dateB == null) return 0;
+        // ★修正点：ここから
+        return dateB.compareTo(dateA); // 日付オブジェクトを比較
+        // ★修正点：ここまで
+      });
+    }
+    return sortedGrouped;
+  }
+  // ★変更点：ここまで
 
   String _formatFileSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -161,10 +211,10 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
   // ファイル名自動生成ロジック
   Future<String> getDefaultFileName(XFile mediaFile) async {
     final File file = File(mediaFile.path);
-    final isVideo = mediaFile.path.toLowerCase().endsWith('.mp4') || 
-                    mediaFile.path.toLowerCase().endsWith('.mov') || 
-                    mediaFile.path.toLowerCase().endsWith('.avi') || 
-                    mediaFile.path.toLowerCase().endsWith('.mkv') || 
+    final isVideo = mediaFile.path.toLowerCase().endsWith('.mp4') ||
+                    mediaFile.path.toLowerCase().endsWith('.mov') ||
+                    mediaFile.path.toLowerCase().endsWith('.avi') ||
+                    mediaFile.path.toLowerCase().endsWith('.mkv') ||
                     mediaFile.path.toLowerCase().endsWith('.wmv');
     final prefix = isVideo ? "VID" : "IMG";
     
@@ -275,7 +325,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
 
     try {
       final File file = File(mediaFile.path);
-      print("\uD83D\uDCE4 アップロード開始: $fileName (\${_formatFileSize(fileSize)})");
+      print("📦 アップロード開始: $fileName (${_formatFileSize(fileSize)})"); // 絵文字修正
       await _driveService.uploadFileToFolder(file, fileName, _currentFolderId);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -288,7 +338,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       print("❌ アップロードエラー: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("「\${_currentFileName}」のアップロードに失敗しました"),
+          content: Text("「$_currentFileName」のアップロードに失敗しました"),
           backgroundColor: Colors.red,
         ),
       );
@@ -314,7 +364,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
 
   void _handleFileTap(Map<String, dynamic> file) {
     if (file['isFolder'] == true) {
-      navigateToFolder(file['fileId'], file['name']);
+      navigateToFolder(file['fileId']!, file['name']!);
     } else {
       Navigator.push(
         context,
@@ -329,6 +379,10 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     }
   }
 
+  // ★変更点：ここから
+  // _buildListViewと_buildGridViewは、後でタイムラインUIに置き換えるため、一旦コメントアウトまたは削除します。
+  // 今回は一旦残し、_buildTimelineViewを呼び出すように変更します。
+  /*
   Widget _buildListView() {
     return ListView.builder(
       itemCount: _files.length,
@@ -461,6 +515,145 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       },
     );
   }
+  */
+
+  // 新しくタイムラインUIを構築するメソッドを作成
+  Widget _buildTimelineView() {
+    if (_groupedFiles.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.photo_library, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text(
+              "この期間に写真や動画はありません\n右上のボタンからアップロードしてください",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+    
+    return ListView.builder(
+      itemCount: _groupedFiles.keys.length,
+      itemBuilder: (context, index) {
+        final dateKey = _groupedFiles.keys.elementAt(index);
+        final filesOnDate = _groupedFiles[dateKey]!;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // タイムラインの線と日付
+              Column(
+                children: [
+                  Text(
+                    dateKey.substring(5), // "MM/DD" 部分のみ表示
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    width: 2,
+                    height: 80, // 適当な高さ。後で調整
+                    color: Colors.grey,
+                  ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              // その日の写真や動画の横スクロールリスト
+              Expanded(
+                child: SizedBox(
+                  height: 100, // サムネイルの高さに合わせて調整
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: filesOnDate.length,
+                    itemBuilder: (context, fileIndex) {
+                      final file = filesOnDate[fileIndex];
+                      final bool isVideo = file['mimeType']?.toString().startsWith('video/') == true;
+                      
+                      return GestureDetector(
+                        onTap: () => _handleFileTap(file),
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: Stack(
+                            children: [
+                              Container(
+                                width: 100, // サムネイルの幅
+                                height: 100, // サムネイルの高さ
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.grey.shade300),
+                                ),
+                                clipBehavior: Clip.antiAlias, // 角丸に画像をクリップ
+                                child: file['thumbnailLink']?.isNotEmpty == true
+                                    ? Image.network(
+                                        file['thumbnailLink']!,
+                                        fit: BoxFit.cover,
+                                        loadingBuilder: (context, child, loadingProgress) {
+                                          if (loadingProgress == null) return child;
+                                          return Center(
+                                            child: CircularProgressIndicator(
+                                              value: loadingProgress.expectedTotalBytes != null
+                                                  ? loadingProgress.cumulativeBytesLoaded /
+                                                      loadingProgress.expectedTotalBytes!
+                                                  : null,
+                                            ),
+                                          );
+                                        },
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return Container(
+                                            color: Colors.grey.shade200,
+                                            child: Center(
+                                              child: _getFileIcon(file['mimeType'] as String),
+                                            ),
+                                          );
+                                        },
+                                      )
+                                    : Container(
+                                        color: Colors.grey.shade200,
+                                        child: Center(
+                                          child: _getFileIcon(file['mimeType'] as String),
+                                        ),
+                                      ),
+                              ),
+                              if (isVideo)
+                                Positioned.fill(
+                                  child: Center(
+                                    child: Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.5),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.play_arrow,
+                                        color: Colors.white,
+                                        size: 32,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  // ★変更点：ここまで
 
   Widget _buildBreadcrumbs() {
     return Container(
@@ -495,7 +688,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                     ),
                   ),
                 ),
-                if (!isLast) 
+                if (!isLast)
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 4),
                     child: Icon(Icons.chevron_right, size: 16),
@@ -529,6 +722,9 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
               )
             : null,
           actions: [
+            // ★変更点：ここから
+            // リスト/グリッドビュー切り替えボタンは今回は不要なのでコメントアウト
+            /*
             IconButton(
               icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
               onPressed: () {
@@ -538,6 +734,8 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
               },
               tooltip: _isGridView ? "リスト表示" : "グリッド表示",
             ),
+            */
+            // ★変更点：ここまで
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: _isUploading ? null : loadFiles,
@@ -592,6 +790,9 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                                 ],
                               ),
                             )
+                          // ★変更点：ここから
+                          // _files.isEmpty判定は_groupedFiles.isEmptyに依存しないため、一旦コメントアウト
+                          /*
                           : _files.isEmpty
                               ? const Center(
                                   child: Column(
@@ -600,7 +801,7 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                                       Icon(Icons.folder_open, size: 64, color: Colors.grey),
                                       SizedBox(height: 16),
                                       Text(
-                                        "このフォルダには何もありません\n右上のボタンから写真や動画をアップロードしてください",
+                                        "このフォルダには何もありません\\n右上のボタンから写真や動画をアップロードしてください",
                                         textAlign: TextAlign.center,
                                         style: TextStyle(color: Colors.grey),
                                       ),
@@ -608,6 +809,9 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                                   ),
                                 )
                               : _isGridView ? _buildGridView() : _buildListView(),
+                          */
+                          : _buildTimelineView(), // ★タイムラインビューを呼び出す！
+                          // ★変更点：ここまで
 
                   // アップロード中のオーバーレイ
                   if (_isUploading)

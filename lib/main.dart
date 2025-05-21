@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'screens/auth_screen.dart'; // ← これがあなたの作ったログイン画面
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: '.env');
   runApp(const MyApp());
 }
 

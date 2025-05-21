@@ -1,5 +1,5 @@
-name: google_login_demo
-description: Google Sign-In Demo for Flutter
+name: family_circle_timeline
+description: Family Circle Timeline
 
 version: 1.0.0+1
 
@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_dotenv: ^5.2.1
   google_sign_in: ^6.0.0
   googleapis: ^13.1.0
   googleapis_auth: ^1.4.0
@@ -22,6 +23,8 @@ dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - .env
 
 dev_dependencies:
   flutter_launcher_icons: ^0.13.1
