@@ -74,11 +74,6 @@ class GoogleDriveService {
     }
   }
 
-  // 既存のメソッドを修正
-  Future<List<drive.File>> listMyDriveFiles() async {
-    return listFolderContents('1ommatmolQ3thyVqmsaWHLuC7iYXPi5q6');
-  }
-
   // アップロードメソッドはそのまま
   Future<void> uploadFileToFolder(File file, String fileName, String folderId) async {
     final driveApi = await getDriveApi();
