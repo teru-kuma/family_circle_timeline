@@ -9,6 +9,9 @@ import 'auth_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+// ★追加：お子様の誕生日を定数として定義 (令和4年12月7日 = 2022年12月7日)
+final _childBirthDate = DateTime.utc(2022, 12, 7);
+
 class DriveExplorerScreen extends StatefulWidget {
   const DriveExplorerScreen({super.key});
 
@@ -379,145 +382,42 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
     }
   }
 
-  // ★変更点：ここから
-  // _buildListViewと_buildGridViewは、後でタイムラインUIに置き換えるため、一旦コメントアウトまたは削除します。
-  // 今回は一旦残し、_buildTimelineViewを呼び出すように変更します。
-  /*
-  Widget _buildListView() {
-    return ListView.builder(
-      itemCount: _files.length,
-      itemBuilder: (context, index) {
-        final file = _files[index];
-        final bool isFolder = file['isFolder'] == true;
-        return ListTile(
-          title: Text(file['name']!),
-          subtitle: Text(isFolder 
-              ? 'フォルダ'
-              : '${file['modifiedTime'] ?? ''}\n${file['size'] ?? ''}'),
-          leading: isFolder
-              ? const Icon(Icons.folder, color: Colors.orange, size: 40)
-              : (file['thumbnailLink']?.isNotEmpty == true
-                  ? Image.network(
-                      file['thumbnailLink']!,
-                      width: 40,
-                      height: 40,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return _getFileIcon(file['mimeType'] as String);
-                      },
-                    )
-                  : _getFileIcon(file['mimeType'] as String)),
-          trailing: isFolder
-              ? const Icon(Icons.arrow_forward_ios)
-              : (file['mimeType']?.toString().startsWith('video/') == true
-                  ? const Icon(Icons.play_circle_outline, color: Colors.red)
-                  : null),
-          isThreeLine: !isFolder,
-          onTap: () => _handleFileTap(file),
-        );
-      },
-    );
+  // ★追加：年齢を計算するヘルパー関数
+  String _calculateAge(DateTime photoDate) {
+    int years = photoDate.year - _childBirthDate.year;
+    int months = photoDate.month - _childBirthDate.month;
+    int days = photoDate.day - _childBirthDate.day;
+
+    if (months < 0 || (months == 0 && days < 0)) {
+      years--;
+      months += 12;
+    }
+
+    if (days < 0) {
+      final lastDayOfMonth = DateTime(photoDate.year, photoDate.month, 0).day;
+      days = lastDayOfMonth + days;
+      months--;
+    }
+
+    if (years < 0) return "生まれる前"; // 撮影日が誕生日より前の場合
+
+    String ageString = "";
+    if (years > 0) {
+      ageString += "${years}歳";
+    }
+    if (months > 0 || (years == 0 && days >= 0)) { // 0歳0ヶ月の場合も表示
+      ageString += "${months}ヶ月";
+    }
+    
+    // 全くの0歳0ヶ月0日の場合は「0ヶ月」と表示される
+    if (years == 0 && months == 0 && days >= 0) {
+      ageString = "0ヶ月"; // 生まれてから1ヶ月未満
+    }
+
+    return ageString.trim();
   }
 
-  Widget _buildGridView() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(8),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.75,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-      ),
-      itemCount: _files.length,
-      itemBuilder: (context, index) {
-        final file = _files[index];
-        final bool isFolder = file['isFolder'] == true;
-        final bool isVideo = !isFolder && file['mimeType']?.toString().startsWith('video/') == true;
-        return GestureDetector(
-          onTap: () => _handleFileTap(file),
-          child: Card(
-            elevation: 3,
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      isFolder
-                          ? Container(
-                              color: Colors.orange.shade100,
-                              child: const Center(
-                                child: Icon(Icons.folder, color: Colors.orange, size: 64),
-                              ),
-                            )
-                          : (file['thumbnailLink']?.isNotEmpty == true
-                              ? Image.network(
-                                  file['thumbnailLink']!,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Container(
-                                      color: Colors.grey.shade200,
-                                      child: Center(
-                                        child: _getFileIcon(file['mimeType'] as String),
-                                      ),
-                                    );
-                                  },
-                                )
-                              : Container(
-                                  color: Colors.grey.shade200,
-                                  child: Center(
-                                    child: _getFileIcon(file['mimeType'] as String),
-                                  ),
-                                )),
-                      if (isVideo)
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.5),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.play_arrow,
-                              color: Colors.white,
-                              size: 32,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        file['name']!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        isFolder ? 'フォルダ' : file['size']!,
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-  */
-
-  // 新しくタイムラインUIを構築するメソッドを作成
+  // _buildTimelineView メソッドを修正
   Widget _buildTimelineView() {
     if (_groupedFiles.isEmpty) {
       return const Center(
@@ -542,6 +442,10 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
         final dateKey = _groupedFiles.keys.elementAt(index);
         final filesOnDate = _groupedFiles[dateKey]!;
 
+        // その日の日付（DateTimeオブジェクト）をパース
+        final dateParsed = DateFormat('yyyy/MM/dd').parse(dateKey);
+        final childAge = _calculateAge(dateParsed); // ★追加：年齢を計算
+
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0),
           child: Row(
@@ -557,6 +461,15 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                       fontSize: 18,
                     ),
                   ),
+                  // ★追加：年齢の表示
+                  if (childAge.isNotEmpty)
+                    Text(
+                      '($childAge)', // 例: (0歳5ヶ月)
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
                   const SizedBox(height: 4),
                   Container(
                     width: 2,
@@ -653,7 +566,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
       },
     );
   }
-  // ★変更点：ここまで
 
   Widget _buildBreadcrumbs() {
     return Container(
