@@ -402,7 +402,6 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
         return "0ヶ月";
     }
 
-
     return ageString.trim();
   }
 
@@ -457,7 +456,8 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                   const SizedBox(height: 4),
                   Container(
                     width: 2,
-                    height: 100,
+                    // ★★★ 高さ調整ポイント 2 ★★★
+                    height: 130, // 100 から 130 に変更
                     color: Colors.grey,
                   ),
                 ],
@@ -465,15 +465,15 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
               const SizedBox(width: 16),
               Expanded(
                 child: SizedBox(
-                  height: 100,
+                  // ★★★ 高さ調整ポイント 1 ★★★
+                  height: 130, // 100 から 130 に変更
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: filesOnDate.length,
                     itemBuilder: (context, fileIndex) {
                       final file = filesOnDate[fileIndex];
                       final bool isVideo = file['mimeType']?.toString().startsWith('video/') == true;
-                      // タイムライン表示ではフォルダは表示しない想定（_groupFilesByDateでフィルタリング済みのため）
-                      // final bool isFolder = file['isFolder'] == true;
+                      final bool isFolder = file['isFolder'] == true;
 
                       return GestureDetector(
                         onTap: () => _handleFileTap(file),
@@ -483,44 +483,64 @@ class _DriveExplorerScreenState extends State<DriveExplorerScreen> {
                             children: [
                               Container(
                                 width: 100,
-                                height: 100,
+                                height: 100, // アイテム自体の高さは100のまま（親のSizedBoxで全体の高さを確保）
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(color: Colors.grey.shade300),
+                                  color: isFolder ? Colors.grey.shade100 : null,
                                 ),
                                 clipBehavior: Clip.antiAlias,
-                                child: file['thumbnailLink']?.isNotEmpty == true
-                                    ? Image.network(
-                                        file['thumbnailLink']!,
-                                        fit: BoxFit.cover,
-                                        loadingBuilder: (context, child, loadingProgress) {
-                                          if (loadingProgress == null) return child;
-                                          return Center(
-                                            child: CircularProgressIndicator(
-                                              value: loadingProgress.expectedTotalBytes != null
-                                                  ? loadingProgress.cumulativeBytesLoaded /
-                                                      loadingProgress.expectedTotalBytes!
-                                                  : null,
+                                child: isFolder
+                                    ? Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.folder, size: 40, color: Colors.orange.shade700),
+                                          // ★★★ フォルダ内のSizedBoxの高さ調整 ★★★
+                                          const SizedBox(height: 4), // 8 から 4 に変更
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                            child: Text(
+                                              file['name']!,
+                                              style: const TextStyle(fontSize: 12),
+                                              textAlign: TextAlign.center,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                          );
-                                        },
-                                        errorBuilder: (context, error, stackTrace) {
-                                          return Container(
+                                          ),
+                                        ],
+                                      )
+                                    : file['thumbnailLink']?.isNotEmpty == true
+                                        ? Image.network(
+                                            file['thumbnailLink']!,
+                                            fit: BoxFit.cover,
+                                            loadingBuilder: (context, child, loadingProgress) {
+                                              if (loadingProgress == null) return child;
+                                              return Center(
+                                                child: CircularProgressIndicator(
+                                                  value: loadingProgress.expectedTotalBytes != null
+                                                      ? loadingProgress.cumulativeBytesLoaded /
+                                                          loadingProgress.expectedTotalBytes!
+                                                      : null,
+                                                ),
+                                              );
+                                            },
+                                            errorBuilder: (context, error, stackTrace) {
+                                              return Container(
+                                                color: Colors.grey.shade200,
+                                                child: Center(
+                                                  child: _getFileIcon(file['mimeType'] as String),
+                                                ),
+                                              );
+                                            },
+                                          )
+                                        : Container(
                                             color: Colors.grey.shade200,
                                             child: Center(
                                               child: _getFileIcon(file['mimeType'] as String),
                                             ),
-                                          );
-                                        },
-                                      )
-                                    : Container(
-                                        color: Colors.grey.shade200,
-                                        child: Center(
-                                          child: _getFileIcon(file['mimeType'] as String),
-                                        ),
-                                      ),
+                                          ),
                               ),
-                              if (isVideo)
+                              if (isVideo && !isFolder)
                                 Positioned.fill(
                                   child: Center(
                                     child: Container(
